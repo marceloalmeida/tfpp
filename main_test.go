@@ -11,45 +11,44 @@ import (
 // TestCreateDir tests the createDir function.
 func TestCreateDir(t *testing.T) {
 	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
+		name      string
+		createNew bool
+		wantErr   bool
 	}{
 		{
-			name:    "create new directory",
-			path:    "/tmp/test_create_dir",
-			wantErr: false,
+			name:      "create new directory",
+			createNew: true,
+			wantErr:   false,
 		},
 		{
-			name:    "create existing directory",
-			path:    "/tmp/test_create_dir_existing",
-			wantErr: false,
+			name:      "create existing directory",
+			createNew: false,
+			wantErr:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up before test
-			os.RemoveAll(tt.path)
-			defer os.RemoveAll(tt.path)
+			tmpDir := t.TempDir()
+			testPath := filepath.Join(tmpDir, "test_dir")
 
 			// For existing directory test, create it first
-			if strings.Contains(tt.name, "existing") {
-				err := os.Mkdir(tt.path, os.ModePerm)
+			if !tt.createNew {
+				err := os.Mkdir(testPath, os.ModePerm)
 				if err != nil {
 					t.Fatalf("Failed to setup test: %v", err)
 				}
 			}
 
-			err := createDir(tt.path)
+			err := createDir(testPath)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("createDir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			// Verify directory exists
-			if _, err := os.Stat(tt.path); os.IsNotExist(err) && !tt.wantErr {
-				t.Errorf("Directory was not created: %v", tt.path)
+			if _, err := os.Stat(testPath); os.IsNotExist(err) && !tt.wantErr {
+				t.Errorf("Directory was not created: %v", testPath)
 			}
 		})
 	}
@@ -59,41 +58,35 @@ func TestCreateDir(t *testing.T) {
 func TestCreateDirRecursive(t *testing.T) {
 	tests := []struct {
 		name    string
-		path    string
+		subpath string
 		wantErr bool
 	}{
 		{
 			name:    "create nested directories",
-			path:    "/tmp/test_recursive/level1/level2/level3",
+			subpath: "level1/level2/level3",
 			wantErr: false,
 		},
 		{
 			name:    "create single directory",
-			path:    "/tmp/test_recursive_single",
+			subpath: "single",
 			wantErr: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Clean up before test
-			baseDir := "/tmp/test_recursive"
-			if strings.Contains(tt.path, "test_recursive_single") {
-				baseDir = "/tmp/test_recursive_single"
-			}
-			os.RemoveAll(baseDir)
-			defer os.RemoveAll("/tmp/test_recursive")
-			defer os.RemoveAll("/tmp/test_recursive_single")
+			tmpDir := t.TempDir()
+			testPath := filepath.Join(tmpDir, tt.subpath)
 
-			err := createDirRecursive(tt.path)
+			err := createDirRecursive(testPath)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("createDirRecursive() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			// Verify directory exists
-			if _, err := os.Stat(tt.path); os.IsNotExist(err) && !tt.wantErr {
-				t.Errorf("Directory was not created: %v", tt.path)
+			if _, err := os.Stat(testPath); os.IsNotExist(err) && !tt.wantErr {
+				t.Errorf("Directory was not created: %v", testPath)
 			}
 		})
 	}
@@ -102,40 +95,43 @@ func TestCreateDirRecursive(t *testing.T) {
 // TestDeleteDir tests the deleteDir function.
 func TestDeleteDir(t *testing.T) {
 	tests := []struct {
-		name    string
-		path    string
-		wantErr bool
+		name      string
+		createDir bool
+		wantErr   bool
 	}{
 		{
-			name:    "delete existing directory",
-			path:    "/tmp/test_delete_dir",
-			wantErr: false,
+			name:      "delete existing directory",
+			createDir: true,
+			wantErr:   false,
 		},
 		{
-			name:    "delete non-existing directory",
-			path:    "/tmp/test_delete_dir_nonexist",
-			wantErr: false,
+			name:      "delete non-existing directory",
+			createDir: false,
+			wantErr:   false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Setup: create directory for existing test
-			if strings.Contains(tt.name, "existing") && !strings.Contains(tt.name, "non-existing") {
-				if err := os.MkdirAll(tt.path, os.ModePerm); err != nil {
+			tmpDir := t.TempDir()
+			testPath := filepath.Join(tmpDir, "test_delete")
+
+			// Setup: create directory if needed
+			if tt.createDir {
+				if err := os.MkdirAll(testPath, os.ModePerm); err != nil {
 					t.Fatalf("Failed to setup test: %v", err)
 				}
 			}
 
-			err := deleteDir(tt.path)
+			err := deleteDir(testPath)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("deleteDir() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
 			// Verify directory doesn't exist
-			if _, err := os.Stat(tt.path); !os.IsNotExist(err) && !tt.wantErr {
-				t.Errorf("Directory was not deleted: %v", tt.path)
+			if _, err := os.Stat(testPath); !os.IsNotExist(err) && !tt.wantErr {
+				t.Errorf("Directory was not deleted: %v", testPath)
 			}
 		})
 	}
@@ -166,10 +162,9 @@ func TestCopyFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			srcPath := "/tmp/test_copy_src.txt"
-			dstPath := "/tmp/test_copy_dst.txt"
-			defer os.Remove(srcPath)
-			defer os.Remove(dstPath)
+			tmpDir := t.TempDir()
+			srcPath := filepath.Join(tmpDir, "src.txt")
+			dstPath := filepath.Join(tmpDir, "dst.txt")
 
 			// Setup: create source file
 			if !tt.setupErr {
@@ -237,8 +232,8 @@ func TestReadFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filePath := "/tmp/test_read_file.txt"
-			defer os.Remove(filePath)
+			tmpDir := t.TempDir()
+			filePath := filepath.Join(tmpDir, "test_file.txt")
 
 			// Setup: create file with content
 			err := os.WriteFile(filePath, []byte(tt.content), 0644)
@@ -268,7 +263,9 @@ func TestReadFile(t *testing.T) {
 
 // TestReadFileError tests the readFile function with non-existing file.
 func TestReadFileError(t *testing.T) {
-	_, err := readFile("/tmp/non_existing_file_12345.txt")
+	tmpDir := t.TempDir()
+	nonExistentPath := filepath.Join(tmpDir, "non_existing_file.txt")
+	_, err := readFile(nonExistentPath)
 	if err == nil {
 		t.Error("readFile() expected error for non-existing file, got nil")
 	}
@@ -300,8 +297,8 @@ func TestWriteFile(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			filePath := "/tmp/test_write_file.txt"
-			defer os.Remove(filePath)
+			tmpDir := t.TempDir()
+			filePath := filepath.Join(tmpDir, "test_file.txt")
 
 			err := writeFile(filePath, tt.content)
 			if (err != nil) != tt.wantErr {
@@ -355,23 +352,18 @@ func TestGetShaSumContents(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Setup test directory and file
-			distPath := "/tmp/test_dist"
+			tmpDir := t.TempDir()
 			repoName := "terraform-provider-example"
 			version := "1.0.0"
 			shaSumFileName := repoName + "_" + version + "_SHA256SUMS"
 
-			if err := os.MkdirAll(distPath, os.ModePerm); err != nil {
-				t.Fatalf("Failed to setup test: %v", err)
-			}
-			defer os.RemoveAll(distPath)
-
-			shaSumPath := filepath.Join(distPath, shaSumFileName)
+			shaSumPath := filepath.Join(tmpDir, shaSumFileName)
 			err := os.WriteFile(shaSumPath, []byte(tt.content), 0644)
 			if err != nil {
 				t.Fatalf("Failed to setup test: %v", err)
 			}
 
-			got, err := getShaSumContents(distPath, repoName, version)
+			got, err := getShaSumContents(tmpDir, repoName, version)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("getShaSumContents() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -397,7 +389,8 @@ func TestGetShaSumContents(t *testing.T) {
 
 // TestGetShaSumContentsError tests error case for getShaSumContents.
 func TestGetShaSumContentsError(t *testing.T) {
-	_, err := getShaSumContents("/tmp/nonexistent", "repo", "1.0.0")
+	tmpDir := t.TempDir()
+	_, err := getShaSumContents(tmpDir, "nonexistent-repo", "1.0.0")
 	if err == nil {
 		t.Error("getShaSumContents() expected error for non-existing file, got nil")
 	}
