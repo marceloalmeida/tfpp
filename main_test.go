@@ -555,3 +555,375 @@ func TestDefaultWellKnownData(t *testing.T) {
 		t.Errorf("ModulesV1 = %v, want /v1/modules/", defaultWellKnownData.ModulesV1)
 	}
 }
+
+// TestCreateDownloadsDir tests the createDownloadsDir function.
+func TestCreateDownloadsDir(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name:    "create downloads directory",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			basePath := filepath.Join(tmpDir, "base") + "/"
+
+			// Create base directory first
+			if err := os.MkdirAll(basePath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup test: %v", err)
+			}
+
+			downloadPath, err := createDownloadsDir(basePath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("createDownloadsDir() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				// Verify download directory was created
+				if downloadPath == nil {
+					t.Error("createDownloadsDir() returned nil downloadPath")
+					return
+				}
+				expectedPath := basePath + "download/"
+				if *downloadPath != expectedPath {
+					t.Errorf("createDownloadsDir() path = %v, want %v", *downloadPath, expectedPath)
+				}
+				if _, err := os.Stat(*downloadPath); os.IsNotExist(err) {
+					t.Errorf("Download directory was not created: %v", *downloadPath)
+				}
+			}
+		})
+	}
+}
+
+// TestCreateTargetDirs tests the createTargetDirs function.
+func TestCreateTargetDirs(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name:    "create target directories",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			basePath := filepath.Join(tmpDir, "downloads") + "/"
+
+			// Create base directory first
+			if err := os.MkdirAll(basePath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup test: %v", err)
+			}
+
+			err := createTargetDirs(basePath)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("createTargetDirs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				// Verify all target directories were created
+				targets := []string{"darwin", "freebsd", "linux", "windows"}
+				for _, target := range targets {
+					targetPath := basePath + target
+					if _, err := os.Stat(targetPath); os.IsNotExist(err) {
+						t.Errorf("Target directory %s was not created", target)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestCopyShaFiles tests the copyShaFiles function.
+func TestCopyShaFiles(t *testing.T) {
+	tests := []struct {
+		name      string
+		repoName  string
+		version   string
+		createSig bool
+		wantPanic bool
+	}{
+		{
+			name:      "copy SHA files with signature",
+			repoName:  "terraform-provider-example",
+			version:   "1.0.0",
+			createSig: true,
+			wantPanic: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			srcPath := filepath.Join(tmpDir, "src")
+			destPath := filepath.Join(tmpDir, "dest") + "/"
+
+			// Setup source and destination directories
+			if err := os.MkdirAll(srcPath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup src: %v", err)
+			}
+			if err := os.MkdirAll(destPath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup dest: %v", err)
+			}
+
+			// Create SHA256SUMS file
+			shaSum := tt.repoName + "_" + tt.version + "_SHA256SUMS"
+			shaSumPath := filepath.Join(srcPath, shaSum)
+			if err := os.WriteFile(shaSumPath, []byte("test content"), 0644); err != nil {
+				t.Fatalf("Failed to create SHA256SUMS: %v", err)
+			}
+
+			// Create signature file
+			if tt.createSig {
+				sigPath := shaSumPath + ".sig"
+				if err := os.WriteFile(sigPath, []byte("signature"), 0644); err != nil {
+					t.Fatalf("Failed to create signature: %v", err)
+				}
+			}
+
+			// Test function - note it uses log.Fatal on error
+			if tt.wantPanic {
+				defer func() {
+					if r := recover(); r == nil {
+						t.Errorf("copyShaFiles() expected panic but didn't panic")
+					}
+				}()
+			}
+
+			copyShaFiles(destPath, srcPath, tt.repoName, tt.version)
+
+			if !tt.wantPanic {
+				// Verify files were copied
+				destShaPath := filepath.Join(destPath, shaSum)
+				if _, err := os.Stat(destShaPath); os.IsNotExist(err) {
+					t.Error("SHA256SUMS file was not copied")
+				}
+
+				if tt.createSig {
+					destSigPath := destShaPath + ".sig"
+					if _, err := os.Stat(destSigPath); os.IsNotExist(err) {
+						t.Error("Signature file was not copied")
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestCopyBuildZips tests the copyBuildZips function.
+func TestCopyBuildZips(t *testing.T) {
+	tests := []struct {
+		name     string
+		zipFiles []string
+		wantErr  bool
+	}{
+		{
+			name: "copy valid zip files",
+			zipFiles: []string{
+				"terraform-provider-example_1.0.0_linux_amd64.zip",
+				"terraform-provider-example_1.0.0_darwin_amd64.zip",
+			},
+			wantErr: false,
+		},
+		{
+			name: "skip non-zip files",
+			zipFiles: []string{
+				"terraform-provider-example_1.0.0_linux_amd64.zip",
+				"terraform-provider-example_1.0.0_linux_amd64.txt",
+			},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			distPath := filepath.Join(tmpDir, "dist") + "/"
+			destPath := filepath.Join(tmpDir, "dest") + "/"
+			repoName := "terraform-provider-example"
+			version := "1.0.0"
+
+			// Setup directories
+			if err := os.MkdirAll(distPath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup dist: %v", err)
+			}
+			if err := os.MkdirAll(destPath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup dest: %v", err)
+			}
+
+			// Create SHA256SUMS file
+			shaSumContent := ""
+			for _, zipFile := range tt.zipFiles {
+				shaSumContent += "abc123  " + zipFile + "\n"
+				// Create zip files
+				zipPath := filepath.Join(distPath, zipFile)
+				if err := os.WriteFile(zipPath, []byte("zip content"), 0644); err != nil {
+					t.Fatalf("Failed to create zip file: %v", err)
+				}
+			}
+			shaSumPath := filepath.Join(distPath, repoName+"_"+version+"_SHA256SUMS")
+			if err := os.WriteFile(shaSumPath, []byte(shaSumContent), 0644); err != nil {
+				t.Fatalf("Failed to create SHA256SUMS: %v", err)
+			}
+
+			err := copyBuildZips(destPath, distPath, repoName, version)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("copyBuildZips() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				// Verify zip files were copied
+				for _, zipFile := range tt.zipFiles {
+					if strings.HasSuffix(zipFile, ".zip") {
+						destZipPath := filepath.Join(destPath, zipFile)
+						if _, err := os.Stat(destZipPath); os.IsNotExist(err) {
+							t.Errorf("Zip file %s was not copied", zipFile)
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestProviderDirs tests the providerDirs function.
+func TestProviderDirs(t *testing.T) {
+	tests := []struct {
+		name          string
+		namespace     string
+		repoName      string
+		version       string
+		wellKnownData WellKnown
+	}{
+		{
+			name:      "create provider directory structure",
+			namespace: "example-org",
+			repoName:  "terraform-provider-example",
+			version:   "1.0.0",
+			wellKnownData: WellKnown{
+				ProvidersV1: "providers",
+				ModulesV1:   "modules",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Change to temp directory for test
+			tmpDir := t.TempDir()
+			t.Chdir(tmpDir)
+
+			resultPath := providerDirs(tt.namespace, tt.repoName, tt.version, tt.wellKnownData)
+
+			// Verify the returned path
+			expectedPath := "release/" + tt.wellKnownData.ProvidersV1 + "/" + tt.namespace + "/" + tt.repoName + "/" + tt.version + "/"
+			if resultPath != expectedPath {
+				t.Errorf("providerDirs() path = %v, want %v", resultPath, expectedPath)
+			}
+
+			// Verify directory structure was created
+			if _, err := os.Stat(resultPath); os.IsNotExist(err) {
+				t.Errorf("Provider directory structure was not created: %v", resultPath)
+			}
+		})
+	}
+}
+
+// TestCreateArchitectureFiles tests the createArchitectureFiles function.
+func TestCreateArchitectureFiles(t *testing.T) {
+	tests := []struct {
+		name    string
+		wantErr bool
+	}{
+		{
+			name:    "create architecture files",
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			namespace := "example-org"
+			provider := "example"
+			distPath := filepath.Join(tmpDir, "dist") + "/"
+			repoName := "terraform-provider-example"
+			version := "1.0.0"
+			gpgFingerprint := "1234567890ABCDEF"
+			domain := "registry.example.com"
+			wellKnownData := WellKnown{
+				ProvidersV1: "/providers/",
+				ModulesV1:   "/modules/",
+			}
+
+			// Setup directories
+			if err := os.MkdirAll(distPath, os.ModePerm); err != nil {
+				t.Fatalf("Failed to setup dist: %v", err)
+			}
+
+			// Create GPG public key file
+			gpgPubKeyFile := filepath.Join(tmpDir, "pubkey.txt")
+			gpgContent := "-----BEGIN PGP PUBLIC KEY BLOCK-----\ntest key\n-----END PGP PUBLIC KEY BLOCK-----"
+			if err := os.WriteFile(gpgPubKeyFile, []byte(gpgContent), 0644); err != nil {
+				t.Fatalf("Failed to create GPG key file: %v", err)
+			}
+
+			// Create SHA256SUMS file
+			shaSumContent := "abc123def456  terraform-provider-example_1.0.0_linux_amd64.zip\n"
+			shaSumPath := filepath.Join(distPath, repoName+"_"+version+"_SHA256SUMS")
+			if err := os.WriteFile(shaSumPath, []byte(shaSumContent), 0644); err != nil {
+				t.Fatalf("Failed to create SHA256SUMS: %v", err)
+			}
+
+			// Change to temp directory for test
+			t.Chdir(tmpDir)
+
+			// Create the directory structure - match what createArchitectureFiles expects
+			prefix := wellKnownData.ProvidersV1 + "/" + namespace + "/" + provider + "/" + version + "/"
+			releasePath := "release" + prefix
+			downloadPath := releasePath + "download/"
+			if err := os.MkdirAll(downloadPath+"linux", os.ModePerm); err != nil {
+				t.Fatalf("Failed to create directory structure: %v", err)
+			}
+
+			err := createArchitectureFiles(namespace, provider, distPath, repoName, version, gpgFingerprint, gpgPubKeyFile, domain, wellKnownData)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("createArchitectureFiles() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr {
+				// Verify architecture file was created
+				archFilePath := downloadPath + "linux/amd64"
+				if _, err := os.Stat(archFilePath); os.IsNotExist(err) {
+					t.Errorf("Architecture file was not created: %v", archFilePath)
+				} else {
+					// Verify the content is valid JSON
+					content, err := os.ReadFile(archFilePath)
+					if err != nil {
+						t.Errorf("Failed to read architecture file: %v", err)
+					} else {
+						var arch Architecture
+						if err := json.Unmarshal(content, &arch); err != nil {
+							t.Errorf("Architecture file is not valid JSON: %v", err)
+						}
+						if arch.Os != "linux" || arch.Arch != "amd64" {
+							t.Errorf("Architecture file has incorrect data: os=%s, arch=%s", arch.Os, arch.Arch)
+						}
+					}
+				}
+			}
+		})
+	}
+}
