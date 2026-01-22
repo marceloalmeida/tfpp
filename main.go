@@ -170,7 +170,7 @@ func createVersionsFile(namespace, provider, distPath, repoName, version, domain
 
 	var ver Version
 	ver.Version = version
-	ver.Protocols = []string{"4.0", "5.1"}
+	ver.Protocols = []string{"5.0", "5.1"}
 	ver.Platforms = []Platform{}
 
 	var vers Versions
