@@ -1,0 +1,70 @@
+name: Create Github Release
+
+env:
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+on:
+  #push:
+  #  branches:
+  #    - main
+  workflow_dispatch: {}
+
+jobs:
+  release:
+    name: Create GitHub Release
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref }}
+
+      - name: Get Current Branch
+        id: get_branch
+        run: |
+          CURR_BRANCH=${GITHUB_HEAD_REF:-${GITHUB_REF#refs/heads/}}
+          echo "CURRENT_BRANCH=$CURR_BRANCH" >> $GITHUB_OUTPUT
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Get Previous Release Version
+        id: get_previous_version
+        run: |
+          LATEST_TAG=$(git describe --abbrev=0 --tags 2>/dev/null || echo "v0.0.0")
+          echo "LATEST_TAG=$LATEST_TAG"
+          echo "VERSION=${LATEST_TAG#v}" >> $GITHUB_OUTPUT
+
+      - name: Dry Run - Check Next Version
+        id: dry_run
+        run: |
+          npm i -D conventional-changelog-conventionalcommits@8.0.0 semantic-release@24.1.0 @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/github
+          NEW_VERSION=$(npx semantic-release --dry-run | grep -oP 'The next release version is \K[0-9]+\.[0-9]+\.[0-9]+' || echo "")
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_OUTPUT
+          
+          if [ -z "$NEW_VERSION" ]; then
+            echo "No version change detected based on commit messages."
+            echo "RELEASE_NEEDED=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version will be: $NEW_VERSION"
+            echo "RELEASE_NEEDED=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create Release
+        if: steps.dry_run.outputs.RELEASE_NEEDED == 'true'
+        run: |
+          npm i -D conventional-changelog-conventionalcommits@8.0.0 semantic-release@24.1.0 @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/github
+          npx semantic-release
+          echo "::notice::🎉 Released version v${{ steps.dry_run.outputs.NEW_VERSION }}"
+
+      - name: No Release Needed
+        if: steps.dry_run.outputs.RELEASE_NEEDED != 'true'
+        run: |
+          echo "::notice::No release needed. Commit messages don't indicate any version change."
