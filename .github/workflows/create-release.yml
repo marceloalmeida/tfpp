@@ -72,6 +72,8 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+          cache-dependency-path: |
+            go.mod
 
       - name: Import GPG key
         if: steps.dry_run.outputs.RELEASE_NEEDED == 'true'

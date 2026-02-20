@@ -22,6 +22,8 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+          cache-dependency-path: |
+            go.mod
       - run: go mod download
       - run: go build -v .
       - name: Run linters
@@ -40,6 +42,8 @@ jobs:
         with:
           go-version-file: 'go.mod'
           cache: true
+          cache-dependency-path: |
+            go.mod
       - run: go mod download
       - env:
           TF_ACC: "1"
