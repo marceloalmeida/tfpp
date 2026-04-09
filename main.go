@@ -442,7 +442,7 @@ func createArchitectureFiles(namespace, provider, distPath, repoName, version, g
 		archFileName := downloadPathPrefix + target + "/" + arch
 
 		var architecture Architecture
-		architecture.Protocols = []string{"4.0", "5.1"}
+		architecture.Protocols = []string{"4.0", "5.0", "5.1"}
 		architecture.Os = target
 		architecture.Arch = arch
 		architecture.Filename = fileName

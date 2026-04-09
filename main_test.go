@@ -423,7 +423,7 @@ func TestPlatformJSON(t *testing.T) {
 func TestVersionJSON(t *testing.T) {
 	version := Version{
 		Version:   "1.0.0",
-		Protocols: []string{"4.0", "5.1"},
+		Protocols: []string{"4.0", "5.0", "5.1"},
 		Platforms: []Platform{
 			{Os: "linux", Arch: "amd64"},
 			{Os: "darwin", Arch: "amd64"},
