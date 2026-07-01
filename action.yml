@@ -64,11 +64,13 @@ runs:
         set -euo pipefail
         repo="marceloalmeida/tfpp"
         if [ "${TFPP_VERSION}" = "latest" ]; then
-          tag=$(curl -fsSL \
+          # Capture the response first: piping curl directly into `grep -m1`
+          # makes grep close the pipe early, which fails curl under pipefail.
+          resp=$(curl -fsSL \
             -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${repo}/releases/latest" \
-            | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+            "https://api.github.com/repos/${repo}/releases/latest")
+          tag=$(grep -m1 '"tag_name"' <<< "${resp}" | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
           if [ -z "${tag}" ]; then
             echo "::error::Could not resolve the latest tfpp release tag." >&2
             exit 1
