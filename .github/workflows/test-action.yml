@@ -56,7 +56,11 @@ jobs:
         uses: ./
         with:
           namespace: exampleorg
-          domain: terraform-registry.example.com
+          # A reachable registry serving /.well-known/terraform.json. This
+          # exercises tfpp's real well-known lookup (versions 404s for the fake
+          # provider, which is handled gracefully). The unreachable-domain
+          # fallback is covered separately by the Go unit tests.
+          domain: registry.terraform.io
           provider-name: example
           repo-name: terraform-provider-example
           version: 1.0.0
