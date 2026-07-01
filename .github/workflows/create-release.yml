@@ -98,6 +98,26 @@ jobs:
           npx semantic-release
           echo "::notice::🎉 Released version v${{ steps.dry_run.outputs.NEW_VERSION }}"
 
+      - name: Update major version tag
+        if: steps.dry_run.outputs.RELEASE_NEEDED == 'true'
+        env:
+          NEW_VERSION: ${{ steps.dry_run.outputs.NEW_VERSION }}
+        run: |
+          set -euo pipefail
+          MAJOR="${NEW_VERSION%%.*}"
+          # Pre-1.0 minors can be breaking, so a floating v0 tag would be
+          # misleading; only maintain the major tag from v1.0.0 onwards.
+          if [ "${MAJOR}" -lt 1 ]; then
+            echo "::notice::Skipping major tag for pre-1.0 release v${NEW_VERSION}."
+            exit 0
+          fi
+          # semantic-release tags the current commit and makes no new commits,
+          # so HEAD is the released commit. Move the floating vN tag there so
+          # consumers can pin the action with @vN.
+          git tag -f "v${MAJOR}"
+          git push -f origin "v${MAJOR}"
+          echo "::notice::Updated v${MAJOR} -> v${NEW_VERSION}"
+
       - name: No Release Needed
         if: steps.dry_run.outputs.RELEASE_NEEDED != 'true'
         run: |
