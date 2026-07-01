@@ -1,0 +1,79 @@
+name: Test Action
+
+on:
+  pull_request:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+  push:
+    paths:
+      - 'action.yml'
+      - '.github/workflows/test-action.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test-action:
+    name: Run action (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build fixture dist/
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          repo="terraform-provider-example"
+          ver="1.0.0"
+          zip_name="${repo}_${ver}_linux_amd64.zip"
+
+          # Dummy provider archive with the name tfpp expects from GoReleaser.
+          (cd dist && echo "dummy provider binary" > payload && zip -q "${zip_name}" payload && rm payload)
+
+          # SHA256SUMS with the archive's real checksum (GoReleaser format: "<sha>  <file>").
+          (
+            cd dist
+            if command -v sha256sum >/dev/null 2>&1; then
+              sha256sum "${zip_name}" > "${repo}_${ver}_SHA256SUMS"
+            else
+              shasum -a 256 "${zip_name}" > "${repo}_${ver}_SHA256SUMS"
+            fi
+          )
+
+          # tfpp only copies the .sig; a placeholder is sufficient for the test.
+          echo "PLACEHOLDER-SIGNATURE" > "dist/${repo}_${ver}_SHA256SUMS.sig"
+          echo "PLACEHOLDER-PUBLIC-KEY" > pubkey.txt
+
+      - name: Package with tfpp action
+        id: pkg
+        uses: ./
+        with:
+          namespace: exampleorg
+          # A reachable registry serving /.well-known/terraform.json. This
+          # exercises tfpp's real well-known lookup (versions 404s for the fake
+          # provider, which is handled gracefully). The unreachable-domain
+          # fallback is covered separately by the Go unit tests.
+          domain: registry.terraform.io
+          provider-name: example
+          repo-name: terraform-provider-example
+          version: 1.0.0
+          gpg-fingerprint: PLACEHOLDER-FINGERPRINT
+
+      - name: Assert output tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch_file="release/v1/providers/exampleorg/example/1.0.0/download/linux/amd64"
+          versions_file="release/v1/providers/exampleorg/example/versions"
+          test -f "${arch_file}" || { echo "::error::missing ${arch_file}"; exit 1; }
+          test -f "${versions_file}" || { echo "::error::missing ${versions_file}"; exit 1; }
+          python3 -c "import json,sys; json.load(open('${versions_file}'))"
+          echo "release-path output: ${{ steps.pkg.outputs.release-path }}"
+          echo "OK"

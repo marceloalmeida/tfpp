@@ -927,3 +927,29 @@ func TestCreateArchitectureFiles(t *testing.T) {
 		})
 	}
 }
+
+// TestDownloadVersionsFileUnreachableDomain ensures that when the registry
+// domain cannot be reached (e.g. a first publish against a registry that does
+// not exist yet), downloadVersionsFile falls back to the default well-known
+// data instead of panicking.
+func TestDownloadVersionsFileUnreachableDomain(t *testing.T) {
+	// t.Chdir isolates the release/ output to a temp dir and restores the
+	// working directory automatically when the test finishes.
+	t.Chdir(t.TempDir())
+
+	// The .invalid TLD is reserved (RFC 6761) and never resolves, so the
+	// well-known fetch fails and the fallback path is exercised.
+	versions, wellKnown, err := downloadVersionsFile("ns", "prov", "nonexistent.invalid")
+	if err == nil {
+		t.Fatalf("Expected an error for an unreachable domain, got nil")
+	}
+	if wellKnown != defaultWellKnownData {
+		t.Errorf("Expected defaultWellKnownData, got %+v", wellKnown)
+	}
+	if len(versions.Versions) != 0 {
+		t.Errorf("Expected empty versions, got %+v", versions.Versions)
+	}
+	if _, statErr := os.Stat("release/.well-known/terraform.json"); statErr != nil {
+		t.Errorf("Expected default well-known file to be written: %v", statErr)
+	}
+}

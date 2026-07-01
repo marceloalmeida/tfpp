@@ -240,22 +240,24 @@ func downloadVersionsFile(namespace, provider, domain string) (Versions, WellKno
 	wellKnownUrl := fmt.Sprintf("https://%s/.well-known/terraform.json", domain)
 	resp, err := httpClient.Get(wellKnownUrl)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Error downloading well-known file: %s or status code not %d", err.Error(), http.StatusOK)
+		reqErr := err
+		if reqErr == nil {
+			reqErr = fmt.Errorf("unexpected status code %d (want %d)", resp.StatusCode, http.StatusOK)
+		}
+		log.Printf("Error downloading well-known file: %s", reqErr)
 
-		wellKnownFile, err := json.MarshalIndent(defaultWellKnownData, "", "  ")
-		if err != nil {
-			log.Fatalf("Error marshalling JSON: %s", err)
+		wellKnownFile, marshalErr := json.MarshalIndent(defaultWellKnownData, "", "  ")
+		if marshalErr != nil {
+			log.Fatalf("Error marshalling JSON: %s", marshalErr)
 		}
-		err = createDirRecursive("release/.well-known/")
-		if err != nil {
-			log.Fatalf("Error creating directory: %s", err)
+		if mkErr := createDirRecursive("release/.well-known/"); mkErr != nil {
+			log.Fatalf("Error creating directory: %s", mkErr)
 		}
-		err = writeFile("release/"+".well-known/terraform.json", wellKnownFile)
-		if err != nil {
-			log.Fatalf("Error writing terraform.json file: %s", err)
+		if writeErr := writeFile("release/"+".well-known/terraform.json", wellKnownFile); writeErr != nil {
+			log.Fatalf("Error writing terraform.json file: %s", writeErr)
 		}
 
-		return Versions{}, defaultWellKnownData, fmt.Errorf("error downloading well-known file: %s or status code not %d", err.Error(), http.StatusOK)
+		return Versions{}, defaultWellKnownData, fmt.Errorf("error downloading well-known file: %w", reqErr)
 	}
 	defer resp.Body.Close()
 
@@ -276,8 +278,12 @@ func downloadVersionsFile(namespace, provider, domain string) (Versions, WellKno
 	versionsUrl := fmt.Sprintf("https://%s%s%s/%s/versions", domain, wellKnownData.ProvidersV1, namespace, provider)
 	resp, err = httpClient.Get(versionsUrl)
 	if err != nil || resp.StatusCode != http.StatusOK {
-		log.Printf("Error downloading versions file: %s or status code not %d", err, http.StatusOK)
-		return Versions{}, wellKnownData, fmt.Errorf("error downloading versions file: %s or status code not %d", err, http.StatusOK)
+		reqErr := err
+		if reqErr == nil {
+			reqErr = fmt.Errorf("unexpected status code %d (want %d)", resp.StatusCode, http.StatusOK)
+		}
+		log.Printf("Error downloading versions file: %s", reqErr)
+		return Versions{}, wellKnownData, fmt.Errorf("error downloading versions file: %w", reqErr)
 	}
 	defer resp.Body.Close()
 

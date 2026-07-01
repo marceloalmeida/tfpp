@@ -1,0 +1,172 @@
+name: Terraform Provider Packager
+description: Package Terraform provider assets from a GoReleaser dist/ directory into a static registry layout with tfpp.
+author: marceloalmeida
+
+branding:
+  icon: package
+  color: purple
+
+inputs:
+  namespace:
+    description: Namespace for the Terraform registry (maps to tfpp -ns).
+    required: true
+  domain:
+    description: Private Terraform registry domain (maps to tfpp -d).
+    required: true
+  provider-name:
+    description: Name of the Terraform provider (maps to tfpp -p).
+    required: true
+  repo-name:
+    description: Provider repository name used in the GoReleaser build files (maps to tfpp -r).
+    required: true
+  version:
+    description: Semantic version of the provider release being packaged (maps to tfpp -v). Note this is the provider version, not the tfpp tool version.
+    required: true
+  gpg-fingerprint:
+    description: GPG fingerprint of the key used by GoReleaser (maps to tfpp -gf).
+    required: true
+  dist-path:
+    description: Path to the GoReleaser build files (maps to tfpp -dp).
+    required: false
+    default: dist
+  gpg-public-key-file:
+    description: Path to the GPG public key in ASCII armor format (maps to tfpp -gk).
+    required: false
+    default: pubkey.txt
+  tfpp-version:
+    description: Version of the tfpp tool to download (e.g. 1.2.3 or v1.2.3). Defaults to the latest release.
+    required: false
+    default: latest
+  working-directory:
+    description: Directory to run tfpp in. The generated release/ directory is created here.
+    required: false
+    default: .
+  github-token:
+    description: Token used to query the tfpp releases API (avoids rate limiting). Defaults to the job token.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  release-path:
+    description: Absolute path to the generated release/ directory.
+    value: ${{ steps.run.outputs.release-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve tfpp version
+      id: resolve
+      shell: bash
+      env:
+        TFPP_VERSION: ${{ inputs.tfpp-version }}
+        GH_TOKEN: ${{ inputs.github-token }}
+      run: |
+        set -euo pipefail
+        repo="marceloalmeida/tfpp"
+        if [ "${TFPP_VERSION}" = "latest" ]; then
+          # Capture the response first: piping curl directly into `grep -m1`
+          # makes grep close the pipe early, which fails curl under pipefail.
+          resp=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${repo}/releases/latest")
+          tag=$(grep -m1 '"tag_name"' <<< "${resp}" | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')
+          if [ -z "${tag}" ]; then
+            echo "::error::Could not resolve the latest tfpp release tag." >&2
+            exit 1
+          fi
+        else
+          tag="${TFPP_VERSION}"
+        fi
+        # Normalize: tag is v-prefixed, version is not.
+        version="${tag#v}"
+        tag="v${version}"
+        echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+        echo "version=${version}" >> "${GITHUB_OUTPUT}"
+        echo "Resolved tfpp ${tag}"
+
+    - name: Download and verify tfpp
+      id: download
+      shell: bash
+      env:
+        TFPP_TAG: ${{ steps.resolve.outputs.tag }}
+        TFPP_VER: ${{ steps.resolve.outputs.version }}
+      run: |
+        set -euo pipefail
+        repo="marceloalmeida/tfpp"
+
+        case "${RUNNER_OS}" in
+          Linux)   os="linux" ;;
+          macOS)   os="darwin" ;;
+          Windows) os="windows" ;;
+          *) echo "::error::Unsupported runner OS: ${RUNNER_OS}" >&2; exit 1 ;;
+        esac
+        case "${RUNNER_ARCH}" in
+          X64)   arch="amd64" ;;
+          X86)   arch="386" ;;
+          ARM)   arch="arm" ;;
+          ARM64) arch="arm64" ;;
+          *) echo "::error::Unsupported runner arch: ${RUNNER_ARCH}" >&2; exit 1 ;;
+        esac
+
+        workdir="$(mktemp -d)"
+        archive="tfpp_${TFPP_VER}_${os}_${arch}.zip"
+        sums="tfpp_${TFPP_VER}_SHA256SUMS"
+        base="https://github.com/${repo}/releases/download/${TFPP_TAG}"
+
+        echo "Downloading ${archive}"
+        if ! curl -fsSL -o "${workdir}/${archive}" "${base}/${archive}"; then
+          echo "::error::Failed to download ${archive} from ${base}. Is tfpp ${TFPP_TAG} published for ${os}/${arch}?" >&2
+          exit 1
+        fi
+        curl -fsSL -o "${workdir}/${sums}" "${base}/${sums}"
+
+        echo "Verifying checksum"
+        (
+          cd "${workdir}"
+          if command -v sha256sum >/dev/null 2>&1; then
+            grep " ${archive}\$" "${sums}" | sha256sum -c -
+          else
+            grep " ${archive}\$" "${sums}" | shasum -a 256 -c -
+          fi
+        )
+
+        echo "Extracting ${archive}"
+        unzip -q -o "${workdir}/${archive}" -d "${workdir}"
+        binary="${workdir}/tfpp_v${TFPP_VER}"
+        if [ "${os}" = "windows" ]; then
+          binary="${binary}.exe"
+        fi
+        if [ ! -f "${binary}" ]; then
+          echo "::error::Expected binary tfpp_v${TFPP_VER} not found in ${archive}." >&2
+          exit 1
+        fi
+        chmod +x "${binary}"
+        echo "binary=${binary}" >> "${GITHUB_OUTPUT}"
+
+    - name: Run tfpp
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        TFPP_BIN: ${{ steps.download.outputs.binary }}
+        IN_NAMESPACE: ${{ inputs.namespace }}
+        IN_DOMAIN: ${{ inputs.domain }}
+        IN_PROVIDER: ${{ inputs.provider-name }}
+        IN_REPO: ${{ inputs.repo-name }}
+        IN_VERSION: ${{ inputs.version }}
+        IN_FINGERPRINT: ${{ inputs.gpg-fingerprint }}
+        IN_DIST: ${{ inputs.dist-path }}
+        IN_PUBKEY: ${{ inputs.gpg-public-key-file }}
+      run: |
+        set -euo pipefail
+        "${TFPP_BIN}" \
+          -ns "${IN_NAMESPACE}" \
+          -d "${IN_DOMAIN}" \
+          -p "${IN_PROVIDER}" \
+          -r "${IN_REPO}" \
+          -v "${IN_VERSION}" \
+          -gf "${IN_FINGERPRINT}" \
+          -dp "${IN_DIST}" \
+          -gk "${IN_PUBKEY}"
+        echo "release-path=$(pwd)/release" >> "${GITHUB_OUTPUT}"
